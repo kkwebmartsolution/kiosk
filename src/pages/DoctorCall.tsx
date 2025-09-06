@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,12 +7,31 @@ import { ArrowLeft } from "lucide-react";
 const DoctorCall = () => {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const roomID = useMemo(() => params.get("room") || "", [params]);
   const iframeSrc = useMemo(() => {
     if (!roomID) return "/WEB_UIKITS.html";
     return `/WEB_UIKITS.html?roomID=${encodeURIComponent(roomID)}`;
   }, [roomID]);
+
+  // Attempt to enter fullscreen on mount and when iframe loads
+  useEffect(() => {
+    const enterFullscreen = async () => {
+      const el: any = containerRef.current || document.documentElement;
+      if (!el) return;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen || el.mozRequestFullScreen;
+      try { req && (await req.call(el)); } catch {}
+    };
+    enterFullscreen();
+    const onLoad = () => enterFullscreen();
+    const iframe = iframeRef.current;
+    iframe?.addEventListener('load', onLoad);
+    return () => {
+      iframe?.removeEventListener('load', onLoad);
+    };
+  }, []);
 
   if (!roomID) {
     // Guard: no room provided
@@ -36,7 +55,7 @@ const DoctorCall = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background p-6">
+    <div ref={containerRef} className="min-h-screen bg-background p-6">
       <div className="max-w-6xl mx-auto">
         <Button variant="ghost" size="lg" onClick={() => navigate("/doctor-portal")} className="mb-4">
           <ArrowLeft className="mr-2" /> Back to Portal
@@ -46,7 +65,7 @@ const DoctorCall = () => {
             <CardTitle>Live Consultation</CardTitle>
           </CardHeader>
           <CardContent>
-            <iframe src={iframeSrc} title="ZegoUIKit" className="w-full h-[80vh] rounded-xl border-0" allow="camera; microphone"></iframe>
+            <iframe ref={iframeRef} src={iframeSrc} title="ZegoUIKit" className="w-full h-[80vh] rounded-xl border-0" allow="camera; microphone; fullscreen" allowFullScreen></iframe>
           </CardContent>
         </Card>
       </div>

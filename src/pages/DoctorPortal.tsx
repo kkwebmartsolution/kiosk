@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,6 +56,8 @@ const DoctorPortal = () => {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [incomingRoomId, setIncomingRoomId] = useState<string | null>(null);
+  const [incomingBookingId, setIncomingBookingId] = useState<string | null>(null);
+  const [incomingAppointmentId, setIncomingAppointmentId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'appointments' | 'earnings' | 'profile'>('appointments');
   const [withdrawOpen, setWithdrawOpen] = useState(false);
   const [withdrawMethod, setWithdrawMethod] = useState<string>("bank");
@@ -65,6 +67,11 @@ const DoctorPortal = () => {
   const [payments, setPayments] = useState<PaymentHistoryItem[]>([]);
   const [loadingEarnings, setLoadingEarnings] = useState(false);
   const [loadingPayments, setLoadingPayments] = useState(false);
+  // Ringtone WebAudio refs
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const oscRef = useRef<OscillatorNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
+  const ringTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -80,9 +87,15 @@ const DoctorPortal = () => {
       .channel(`calls:doctor_${doctorProfile.id}`)
       .on('broadcast', { event: 'incoming_call' }, (payload: any) => {
         const roomId = payload?.payload?.roomId;
+        const bookingId = payload?.payload?.bookingId || null;
+        const appointmentId = payload?.payload?.appointmentId || null;
         if (roomId) {
           setIncomingRoomId(roomId);
+          setIncomingBookingId(bookingId);
+          setIncomingAppointmentId(appointmentId);
           toast({ title: 'Incoming Call', description: 'A patient wants to start a consultation.' });
+          // Try to start ringtone (may be blocked by autoplay policies until prior user interaction)
+          startRingtone();
         }
       })
       .subscribe((status) => {
@@ -90,6 +103,89 @@ const DoctorPortal = () => {
       });
     return () => { supabase.removeChannel(channel); };
   }, [doctorProfile]);
+
+  // Stop ringtone when incoming call is cleared or component unmounts
+  useEffect(() => {
+    if (!incomingRoomId) {
+      stopRingtone();
+    }
+    return () => {
+      stopRingtone();
+    };
+  }, [incomingRoomId]);
+
+  const startRingtone = () => {
+    try {
+      // If already ringing, do nothing
+      if (audioCtxRef.current && oscRef.current && gainRef.current) return;
+
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx: AudioContext = audioCtxRef.current ?? new AudioCtx();
+      audioCtxRef.current = ctx;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      oscRef.current = osc;
+      gainRef.current = gain;
+
+      // Configure tone
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+
+      // Ring pattern: on 700ms, off 500ms
+      let on = false;
+      const tick = () => {
+        on = !on;
+        const target = on ? 0.2 : 0.0001;
+        try {
+          gain.gain.linearRampToValueAtTime(target, ctx.currentTime + 0.05);
+        } catch {}
+      };
+      tick();
+      ringTimerRef.current = window.setInterval(tick, 700);
+
+      // Ensure context is resumed in case it was suspended
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {
+          // If resume fails due to autoplay policy, ignore silently
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to start ringtone', e);
+    }
+  };
+
+  const stopRingtone = () => {
+    try {
+      if (ringTimerRef.current) {
+        clearInterval(ringTimerRef.current);
+        ringTimerRef.current = null;
+      }
+      if (gainRef.current) {
+        try { gainRef.current.gain.setValueAtTime(0.0001, audioCtxRef.current?.currentTime || 0); } catch {}
+      }
+      if (oscRef.current) {
+        try { oscRef.current.stop(); } catch {}
+        try { oscRef.current.disconnect(); } catch {}
+        oscRef.current = null;
+      }
+      if (gainRef.current) {
+        try { gainRef.current.disconnect(); } catch {}
+        gainRef.current = null;
+      }
+      // Keep AudioContext for reuse to avoid user gesture requirement, but suspend it
+      if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
+        audioCtxRef.current.suspend().catch(() => {});
+      }
+    } catch (e) {
+      console.warn('Failed to stop ringtone', e);
+    }
+  };
 
   const fetchDoctorData = async () => {
     try {
@@ -254,21 +350,39 @@ const DoctorPortal = () => {
       </div>
 
       <div className="max-w-6xl mx-auto px-4 pb-24 pt-4">
-        {incomingRoomId && (
-          <div className="mb-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>Incoming Video Call</CardTitle>
-              </CardHeader>
-              <CardContent className="flex gap-3">
-                <Button onClick={() => navigate(`/doctor/call?room=${encodeURIComponent(incomingRoomId)}`)} className="gap-2">
-                  Accept & Join
-                </Button>
-                <Button variant="secondary" onClick={() => setIncomingRoomId(null)}>Dismiss</Button>
-              </CardContent>
-            </Card>
-          </div>
-        )}
+        <Dialog open={!!incomingRoomId} onOpenChange={(o) => { if (!o) { stopRingtone(); setIncomingRoomId(null); } }}>
+          <DialogContent className="sm:max-w-md text-center">
+            <DialogHeader>
+              <DialogTitle>Incoming Video Call</DialogTitle>
+            </DialogHeader>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <Button onClick={async () => {
+                try {
+                  if (incomingRoomId) {
+                    const roomChannel = supabase.channel(`calls:room_${incomingRoomId}`);
+                    await roomChannel.subscribe();
+                    await roomChannel.send({ type: 'broadcast', event: 'doctor_accepted', payload: { roomId: incomingRoomId, bookingId: incomingBookingId || undefined, acceptedAt: new Date().toISOString() }});
+                    await supabase.removeChannel(roomChannel);
+                  }
+                } catch (e) {
+                  console.warn('Failed to notify acceptance', e);
+                }
+                try {
+                  if (incomingAppointmentId) {
+                    await supabase.from('appointments').update({ status: 'confirmed' }).eq('id', incomingAppointmentId);
+                  }
+                } catch (e) {
+                  console.warn('Failed to update appointment status', e);
+                }
+                stopRingtone();
+                navigate(`/doctor/call?room=${encodeURIComponent(incomingRoomId!)}`);
+              }} className="gap-2">
+                Accept & Join
+              </Button>
+              <Button variant="secondary" onClick={() => { stopRingtone(); setIncomingRoomId(null); }}>Reject</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {/* Desktop: 3-column overview; Mobile: tabbed views */}
         <div className="hidden lg:grid grid-cols-3 gap-6">

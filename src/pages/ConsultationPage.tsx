@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,6 +16,12 @@ const ConsultationPage = () => {
   const navigate = useNavigate();
   const [consultationData, setConsultationData] = useState<ConsultationData | null>(null);
   const [consultationStarted, setConsultationStarted] = useState(false);
+  const [roomId, setRoomId] = useState<string>("");
+  const [doctorAccepted, setDoctorAccepted] = useState(false);
+  const [joinVisible, setJoinVisible] = useState(false);
+  const [joining, setJoining] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<number>(180); // seconds
+  const roomChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   useEffect(() => {
     const storedData = localStorage.getItem("consultationData");
@@ -29,22 +35,63 @@ const ConsultationPage = () => {
 
   const handleStartConsultation = async () => {
     setConsultationStarted(true);
-    // Signal doctor via Supabase Realtime about the incoming call
+    // Determine room and signal doctor
+    const newRoomId = (consultationData as any)?.roomId || `room_${Date.now()}`;
+    setRoomId(newRoomId);
+    // Subscribe to room channel for doctor acceptance (do this before sending to avoid race)
     try {
-      const roomId = (consultationData as any)?.roomId || `room_${Date.now()}`;
+      const appointmentId = (consultationData as any)?.appointmentId;
+      const roomChannel = supabase
+        .channel(`calls:room_${newRoomId}`)
+        .on('broadcast', { event: 'doctor_accepted' }, (_payload: any) => {
+          setDoctorAccepted(true);
+          setJoinVisible(true);
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'appointments', filter: appointmentId ? `id=eq.${appointmentId}` : undefined }, (payload: any) => {
+          const newStatus = payload?.new?.status;
+          if (newStatus === 'confirmed') {
+            setDoctorAccepted(true);
+            setJoinVisible(true);
+          }
+        });
+      roomChannelRef.current = roomChannel;
+      await roomChannel.subscribe();
+    } catch (e) {
+      console.warn('Failed to subscribe to room channel', e);
+    }
+
+    // Now signal doctor via Supabase Realtime about the incoming call
+    try {
       const doctorChannel = supabase.channel(`calls:doctor_${(consultationData as any)?.doctorId}`);
       await doctorChannel.subscribe();
       await doctorChannel.send({ type: 'broadcast', event: 'incoming_call', payload: {
-        roomId,
+        roomId: newRoomId,
         appointmentId: (consultationData as any)?.appointmentId,
         bookingId: (consultationData as any)?.bookingId,
       }});
+      await supabase.removeChannel(doctorChannel);
     } catch (e) {
       console.warn('Failed to publish incoming call event', e);
     }
-
-    // Patient will render Zego WebUIKit via iframe below
   };
+
+  // Countdown timer while waiting for doctor to accept
+  useEffect(() => {
+    if (!consultationStarted || doctorAccepted) return;
+    if (timeLeft <= 0) return;
+    const t = window.setInterval(() => setTimeLeft((s) => s - 1), 1000);
+    return () => clearInterval(t);
+  }, [consultationStarted, doctorAccepted, timeLeft]);
+
+  // Cleanup room channel on unmount
+  useEffect(() => {
+    return () => {
+      if (roomChannelRef.current) {
+        try { supabase.removeChannel(roomChannelRef.current); } catch {}
+        roomChannelRef.current = null;
+      }
+    };
+  }, []);
 
   const handleEndConsultation = async () => {
     try {
@@ -109,7 +156,7 @@ const ConsultationPage = () => {
 
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-foreground mb-4">
-            {consultationStarted ? "Consultation Active" : "Start Consultation"}
+            {!consultationStarted ? "Start Consultation" : doctorAccepted ? "Doctor Accepted" : "Waiting for Doctor"}
           </h1>
           <p className="text-xl text-muted-foreground">
             Connect with {consultationData.doctorName}
@@ -175,28 +222,61 @@ const ConsultationPage = () => {
             </div>
           </div>
         ) : (
-          /* Active Consultation Interface with Zego via iframe */
-          <Card className="border-2">
-            <CardHeader className="bg-success/5 border-b">
-              <CardTitle className="text-2xl text-center flex items-center justify-center gap-3">
-                <div className="w-3 h-3 bg-success rounded-full animate-pulse"></div>
-                Consultation in Progress
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <iframe
-                src={`/WEB_UIKITS.html?roomID=${encodeURIComponent((consultationData as any)?.roomId || '')}`}
-                title="ZegoUIKit"
-                className="w-full h-[75vh] rounded-xl border-0"
-                allow="camera; microphone"
-              />
-              <div className="p-6 flex justify-center">
-                <Button onClick={handleEndConsultation} size="kiosk" className="bg-destructive hover:bg-destructive/90">
-                  End Consultation & Continue
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          // Waiting or Accepted state
+          <div className="space-y-6">
+            {!doctorAccepted ? (
+              <Card className="border-2">
+                <CardHeader className="bg-amber-50 border-b">
+                  <CardTitle className="text-2xl text-center">Waiting for Doctor to Accept</CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 text-center">
+                  <p className="text-lg mb-2">A notification has been sent to your doctor.</p>
+                  <p className="text-sm text-muted-foreground mb-6">You can join only after the doctor accepts.</p>
+                  <div className="text-5xl font-bold tabular-nums">
+                    {Math.floor(timeLeft / 60).toString().padStart(2, '0')}
+                    :
+                    {(timeLeft % 60).toString().padStart(2, '0')}
+                  </div>
+                  {timeLeft <= 0 && (
+                    <div className="mt-6">
+                      <p className="text-destructive mb-3">Timed out waiting for acceptance.</p>
+                      <Button size="kiosk" onClick={() => { setConsultationStarted(false); setDoctorAccepted(false); setJoinVisible(false); setTimeLeft(180); setRoomId(""); }}>
+                        Try Again
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="border-2">
+                <CardHeader className="bg-green-50 border-b">
+                  <CardTitle className="text-2xl text-center">Doctor Accepted</CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 text-center space-y-6">
+                  {joinVisible && !joining && (
+                    <Button size="kiosk" className="w-full" onClick={() => setJoining(true)}>
+                      Join Video Call
+                    </Button>
+                  )}
+                  {joining && (
+                    <div>
+                      <iframe
+                        src={`/WEB_UIKITS.html?roomID=${encodeURIComponent(roomId)}`}
+                        title="ZegoUIKit"
+                        className="w-full h-[75vh] rounded-xl border-0"
+                        allow="camera; microphone"
+                      />
+                      <div className="p-6 flex justify-center">
+                        <Button onClick={handleEndConsultation} size="kiosk" className="bg-destructive hover:bg-destructive/90">
+                          End Consultation & Continue
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </div>
         )}
       </div>
     </div>
