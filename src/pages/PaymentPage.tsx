@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, CreditCard, Smartphone, Banknote, CheckCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import Razorpay from "razorpay";
 
 interface ConfirmationData {
   bookingId: string;
@@ -21,11 +22,25 @@ const paymentMethods = [
   { id: "cash", name: "Cash Payment", icon: Banknote, description: "Pay at reception counter" }
 ];
 
+// utils/loadRazorpay.ts
+export const loadRazorpayScript = (): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.body.appendChild(script);
+  });
+};
+
+
 const PaymentPage = () => {
   const navigate = useNavigate();
   const [confirmationData, setConfirmationData] = useState<ConfirmationData | null>(null);
   const [selectedPayment, setSelectedPayment] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+
+
 
   useEffect(() => {
     const storedData = localStorage.getItem("confirmationData");
@@ -39,82 +54,124 @@ const PaymentPage = () => {
   const handlePayment = async () => {
     if (!selectedPayment) return;
 
+    const res = await loadRazorpayScript();
+    if (!res) {
+      alert("Razorpay SDK failed to load. Are you online?");
+      return;
+    }
+
     setIsProcessing(true);
-    
-    // Simulate payment processing
-    setTimeout(async () => {
-      try {
-        const roomId = `room_${confirmationData?.bookingId || Date.now()}`;
-        const patientId = localStorage.getItem('patientId');
-        if (!patientId) {
-          setIsProcessing(false);
-          navigate('/login');
-          return;
-        }
 
-        // Create the appointment AFTER payment success
-        const now = new Date();
-        const appointmentDate = now.toISOString().split('T')[0];
-        const appointmentTime = now.toTimeString().slice(0,5);
-        const { data: appointment, error } = await supabase
-          .from('appointments')
-          .insert({
-            patient_id: patientId,
-            doctor_id: confirmationData?.doctorId,
-            appointment_date: appointmentDate,
-            appointment_time: appointmentTime,
-            patient_name: 'Kiosk Patient',
-            patient_age: 0,
-            consultation_fee: confirmationData?.consultationFee,
-            booking_id: confirmationData?.bookingId,
-            status: 'confirmed'
-          })
-          .select()
-          .single();
+    const result = await fetch("http://localhost:5000/api/create-order", { /// paste razor pay vvirtual server url ip
+      body: JSON.stringify({
+        "amount": confirmationData?.totalAmount
+      }), method: "POST", headers: {
+        "Content-Type": "application/json",
+      },});
 
-        if (error) {
-          console.error('Failed to create appointment after payment:', error);
-          setIsProcessing(false);
-          return;
-        }
 
-        // Record the payment for doctor earnings
+      const order = await result.json();
+
+   
+
+    const options2 = {
+      key: import.meta.env.VITE_RAZORPAY_KEY_ID, // only key_id goes in frontend
+      amount: order.amount,
+      currency: order.currency,
+      name: "Doctor Consultation",
+      description: "Booking Payment",
+      order_id: order.id,
+      handler: async function (response: any) {
         try {
-          const paymentInsert = await (supabase as any)
-            .from('payments')
-            .insert({
-              appointment_id: appointment?.id,
-              doctor_id: confirmationData?.doctorId,
-              patient_id: patientId,
-              patient_name: 'Kiosk Patient',
-              amount: confirmationData?.consultationFee,
-              method: selectedPayment,
-              status: 'completed',
-            });
-          if (paymentInsert.error) {
-            console.warn('Payment record insert failed (non-blocking):', paymentInsert.error);
+          const roomId = `room_${confirmationData?.bookingId || Date.now()}`;
+          const patientId = localStorage.getItem('patientId');
+          if (!patientId) {
+            setIsProcessing(false);
+            navigate('/login');
+            return;
           }
+  
+          // Create the appointment AFTER payment success
+          const now = new Date();
+          const appointmentDate = now.toISOString().split('T')[0];
+          const appointmentTime = now.toTimeString().slice(0,5);
+          const { data: appointment, error } = await supabase
+            .from('appointments')
+            .insert({
+              patient_id: patientId,
+              doctor_id: confirmationData?.doctorId,
+              appointment_date: appointmentDate,
+              appointment_time: appointmentTime,
+              patient_name: 'Kiosk Patient',
+              patient_age: 0,
+              consultation_fee: confirmationData?.consultationFee,
+              booking_id: confirmationData?.bookingId,
+              status: 'confirmed'
+            })
+            .select()
+            .single();
+  
+          if (error) {
+            console.error('Failed to create appointment after payment:', error);
+            setIsProcessing(false);
+            return;
+          }
+  
+          // Record the payment for doctor earnings
+          try {
+            const paymentInsert = await (supabase as any)
+              .from('payments')
+              .insert({
+                appointment_id: appointment?.id,
+                doctor_id: confirmationData?.doctorId,
+                patient_id: patientId,
+                patient_name: 'Kiosk Patient',
+                amount: confirmationData?.consultationFee,
+                method: selectedPayment,
+                status: 'completed',
+              });
+            if (paymentInsert.error) {
+              console.warn('Payment record insert failed (non-blocking):', paymentInsert.error);
+            }
+          } catch (e) {
+            console.warn('Payment record insert error (non-blocking):', e);
+          }
+  
+          const consultationData = {
+            bookingId: confirmationData?.bookingId,
+            appointmentId: appointment?.id,
+            doctorId: confirmationData?.doctorId,
+            doctorName: confirmationData?.doctorName,
+            totalAmount: confirmationData?.totalAmount,
+            paymentMethod: selectedPayment,
+            paymentStatus: "completed",
+            roomId,
+          } as any;
+          localStorage.setItem("consultationData", JSON.stringify(consultationData));
+          setIsProcessing(false);
+          navigate("/consultation");
         } catch (e) {
-          console.warn('Payment record insert error (non-blocking):', e);
+          console.error('Payment flow error:', e);
+          setIsProcessing(false);
         }
+      },
+      prefill: {
+        name: "Test User",
+        email: "test@example.com",
+        contact: "9999999999"
+      },
+      theme: { color: "#3399cc" }
+    };
 
-        const consultationData = {
-          bookingId: confirmationData?.bookingId,
-          appointmentId: appointment?.id,
-          doctorId: confirmationData?.doctorId,
-          doctorName: confirmationData?.doctorName,
-          totalAmount: confirmationData?.totalAmount,
-          paymentMethod: selectedPayment,
-          paymentStatus: "completed",
-          roomId,
-        } as any;
-        localStorage.setItem("consultationData", JSON.stringify(consultationData));
-        setIsProcessing(false);
-        navigate("/consultation");
-      } catch (e) {
-        console.error('Payment flow error:', e);
-        setIsProcessing(false);
-      }
+    // 3. Open Razorpay checkout
+    const rzp = new (window as any).Razorpay(options2); // comment these two lines 
+    rzp.open(); //
+
+   /// Simulate payment processing
+    setTimeout(async () => {
+  // paste here
+
+
     }, 2000);
   };
 

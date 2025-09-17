@@ -7,6 +7,8 @@ interface KeyboardContextValue {
   showKeyboard: () => void;
   hideKeyboard: () => void;
   pressKey: (key: string) => void;
+  layout: 'default' | 'numeric';
+  setLayout: (layout: 'default' | 'numeric') => void;
 }
 
 const KeyboardContext = createContext<KeyboardContextValue | undefined>(undefined);
@@ -20,6 +22,7 @@ export const useKeyboard = () => {
 export const KeyboardProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [show, setShow] = useState(false);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+  const [layout, setLayout] = useState<'default' | 'numeric'>('default');
 
   const setInputRef = useCallback((ref: React.RefObject<any>) => {
     inputRef.current = ref?.current ?? null;
@@ -36,6 +39,10 @@ export const KeyboardProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
         inputRef.current = target as any;
         setShow(true);
+        // Auto-detect numeric layout for phone inputs
+        const el = target as HTMLInputElement;
+        const isNumeric = (el.getAttribute('inputmode')?.toLowerCase() === 'numeric') || (el.type?.toLowerCase() === 'tel');
+        setLayout(isNumeric ? 'numeric' : 'default');
       }
     };
     const handlePointerDown = (e: PointerEvent) => {
@@ -74,6 +81,10 @@ export const KeyboardProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         el.setSelectionRange(start, start);
       }
     } else if (key === 'Space') {
+      if (layout === 'numeric') {
+        // Disallow spaces in numeric mode
+        return;
+      }
       const before = el.value.slice(0, start);
       const after = el.value.slice(end);
       el.value = before + ' ' + after;
@@ -84,6 +95,10 @@ export const KeyboardProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       el.value = before + "\n" + after;
       el.setSelectionRange(start + 1, start + 1);
     } else {
+      // Enforce numeric-only when layout is numeric
+      if (layout === 'numeric' && !/^[0-9]$/.test(key)) {
+        return;
+      }
       const before = el.value.slice(0, start);
       const after = el.value.slice(end);
       el.value = before + key + after;
@@ -91,9 +106,9 @@ export const KeyboardProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
     // Trigger input event so React picks up value changes
     el.dispatchEvent(new Event('input', { bubbles: true }));
-  }, []);
+  }, [layout]);
 
-  const value = useMemo(() => ({ show, inputRef: inputRef as any, setInputRef, showKeyboard, hideKeyboard, pressKey }), [show, setInputRef, showKeyboard, hideKeyboard, pressKey]);
+  const value = useMemo(() => ({ show, inputRef: inputRef as any, setInputRef, showKeyboard, hideKeyboard, pressKey, layout, setLayout }), [show, setInputRef, showKeyboard, hideKeyboard, pressKey, layout]);
 
   return (
     <KeyboardContext.Provider value={value}>

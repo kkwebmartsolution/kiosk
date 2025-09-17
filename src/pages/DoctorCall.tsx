@@ -55,20 +55,15 @@ const DoctorCall = () => {
   }
 
   return (
-    <div ref={containerRef} className="min-h-screen bg-background p-6">
-      <div className="max-w-6xl mx-auto">
-        <Button variant="ghost" size="lg" onClick={() => navigate("/doctor-portal")} className="mb-4">
-          <ArrowLeft className="mr-2" /> Back to Portal
-        </Button>
-        <Card>
-          <CardHeader>
-            <CardTitle>Live Consultation</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <iframe ref={iframeRef} src={iframeSrc} title="ZegoUIKit" className="w-full h-[80vh] rounded-xl border-0" allow="camera; microphone; fullscreen" allowFullScreen></iframe>
-          </CardContent>
-        </Card>
-      </div>
+    <div ref={containerRef} className="fixed inset-0 bg-black">
+      <iframe
+        ref={iframeRef}
+        src={iframeSrc}
+        title="ZegoUIKit"
+        className="w-full h-full border-0"
+        allow="camera; microphone; fullscreen"
+        allowFullScreen
+      />
     </div>
   );
 };
