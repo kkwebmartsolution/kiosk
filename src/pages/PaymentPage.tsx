@@ -62,7 +62,7 @@ const PaymentPage = () => {
 
     setIsProcessing(true);
 
-    const result = await fetch("http://localhost:5000/api/create-order", { /// paste razor pay vvirtual server url ip
+    const result = await fetch("https://razorpay-steel-xi.vercel.app/api/create-order", { /// paste razor pay vvirtual server url ip
       body: JSON.stringify({
         "amount": confirmationData?.totalAmount
       }), method: "POST", headers: {
