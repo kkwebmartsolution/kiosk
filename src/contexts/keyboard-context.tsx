@@ -36,6 +36,8 @@ export const KeyboardProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const handleFocusIn = (e: FocusEvent) => {
       const target = e.target as HTMLElement | null;
       if (!target) return;
+      // Opt-out: if the focused element or any ancestor has data-no-osk, do nothing
+      if (target.closest('[data-no-osk]')) return;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
         inputRef.current = target as any;
         setShow(true);

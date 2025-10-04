@@ -22,6 +22,7 @@ import LoginPage from "./pages/LoginPage";
 import DoctorCall from "./pages/DoctorCall";
 import DoctorPrescription from "./pages/DoctorPrescription";
 import PatientPrescriptions from "./pages/PatientPrescriptions";
+import AdminPage from "./pages/AdminPage";
 
 const queryClient = new QueryClient();
 
@@ -43,6 +44,7 @@ const App = () => (
             <Route path="/doctor/call" element={<DoctorCall />} />
             <Route path="/doctor/prescription" element={<DoctorPrescription />} />
             <Route path="/prescriptions" element={<PatientPrescriptions />} />
+            <Route path="/admin" element={<AdminPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/booking" element={<BookingPage />} />
             <Route path="/confirmation" element={<ConfirmationPage />} />

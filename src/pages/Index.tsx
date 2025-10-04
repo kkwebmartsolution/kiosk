@@ -24,7 +24,7 @@ const Index = () => {
                 <Heart className="w-8 h-8" />
               </div>
               <div>
-                <h1 className="text-3xl font-bold">CareFlow Kiosk</h1>
+                <h1 className="text-3xl font-bold">teleheal</h1>
                 <p className="text-lg opacity-90">Your Health, Our Priority</p>
               </div>
             </div>
@@ -76,7 +76,7 @@ const Index = () => {
                     <UserPlus className="w-12 h-12 text-primary" />
                   </div>
                   <div>
-                    <h3 className="text-3xl font-bold text-foreground mb-3">New Customer</h3>
+                    <h3 className="text-3xl font-bold text-foreground mb-3">New Patient</h3>
                     <p className="text-xl text-muted-foreground mb-6">
                       First time visiting? Register and book your appointment
                     </p>
@@ -93,7 +93,7 @@ const Index = () => {
                     <Users className="w-12 h-12 text-primary" />
                   </div>
                   <div>
-                    <h3 className="text-3xl font-bold text-foreground mb-3">Existing Customer</h3>
+                    <h3 className="text-3xl font-bold text-foreground mb-3">Existing Patient</h3>
                     <p className="text-xl text-muted-foreground mb-6">
                       Already have an account? Continue with your account
                     </p>

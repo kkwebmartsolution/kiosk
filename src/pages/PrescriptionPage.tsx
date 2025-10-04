@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Download, Printer, QrCode, CheckCircle, Calendar, Video } from "lucide-react";
+import { ArrowLeft, Download, Eye, QrCode, CheckCircle, Calendar, Video } from "lucide-react";
 
 interface PrescriptionData {
   bookingId: string;
@@ -34,9 +34,8 @@ const PrescriptionPage = () => {
     alert("Prescription downloaded successfully!");
   };
 
-  const handlePrint = () => {
-    // In a real app, this would open the print dialog
-    window.print();
+  const handleViewPrescription = () => {
+    navigate("/prescriptions");
   };
 
   const handleNewAppointment = () => {
@@ -154,13 +153,13 @@ const PrescriptionPage = () => {
                 </Button>
                 
                 <Button
-                  onClick={handlePrint}
+                  onClick={handleViewPrescription}
                   variant="outline"
                   size="lg"
                   className="w-full"
                 >
-                  <Printer className="mr-2" />
-                  Print Receipt
+                  <Eye className="mr-2" />
+                  View Prescription
                 </Button>
                 
                 <Button
